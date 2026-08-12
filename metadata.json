@@ -1,0 +1,6 @@
+{
+  "name": "Saman Mental Health Platform",
+  "description": "An offline-first modular mental health & therapy management platform with smart AI assistant and plugin architecture.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

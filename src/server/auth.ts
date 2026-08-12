@@ -1,0 +1,66 @@
+import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
+
+const JWT_SECRET = process.env.JWT_SECRET || 'saman-secret-key-2026';
+const THERAPIST_PASSWORD = process.env.THERAPIST_PASSWORD || 'saman123';
+
+export function generateToken(payload: object, expiresIn: string | number = '12h'): string {
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: expiresIn as any });
+}
+
+export function verifyToken(token: string): any {
+  try {
+    return jwt.verify(token, JWT_SECRET);
+  } catch {
+    return null;
+  }
+}
+
+export function authMiddleware(req: Request, res: Response, next: NextFunction) {
+  // Public endpoints
+  if (req.path === '/api/health' || req.path === '/api/login') {
+    return next();
+  }
+
+  // Non-API routes (e.g. Vite SPA frontend routes)
+  if (!req.path.startsWith('/api/')) {
+    return next();
+  }
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized: Missing token' });
+  }
+
+  const token = authHeader.split(' ')[1];
+  const decoded = verifyToken(token);
+
+  if (!decoded) {
+    return res.status(401).json({ error: 'Unauthorized: Invalid or expired token' });
+  }
+
+  (req as any).user = decoded;
+  next();
+}
+
+export function handleLogin(req: Request, res: Response) {
+  const { password } = req.body;
+  if (!password || password !== THERAPIST_PASSWORD) {
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
+
+  const token = generateToken({
+    role: 'therapist',
+    user: 'dr_mohammadi',
+    issuedAt: new Date().toISOString(),
+  });
+
+  return res.json({
+    status: 'success',
+    token,
+    user: {
+      name: 'دکتر علیرضا محمدی',
+      role: 'therapist',
+    },
+  });
+}
