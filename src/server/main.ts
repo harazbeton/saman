@@ -10,10 +10,12 @@ import { createServer as createViteServer } from 'vite';
 export async function bootstrap(port = 3000) {
   // Initialize SQLite database
   await getSqliteDb();
-
+  
   const app = await NestFactory.create(AppModule);
-
   const expressApp = app.getHttpAdapter().getInstance();
+
+  expressApp.use(express.json());
+  expressApp.use(express.urlencoded({ extended: true }));
 
   // Vite Middleware in Dev & Static Serving in Prod
   if (process.env.NODE_ENV !== 'production') {
@@ -21,10 +23,30 @@ export async function bootstrap(port = 3000) {
       server: { middlewareMode: true },
       appType: 'spa',
     });
-    expressApp.use(vite.middlewares);
+    expressApp.use((req, res, next) => {
+      if (req.url.startsWith('/api')) {
+        next();
+      } else {
+        vite.middlewares(req, res, next);
+      }
+    });
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    expressApp.use(express.static(distPath));
+    expressApp.use((req, res, next) => {
+      if (req.url.startsWith('/api')) {
+        next();
+      } else {
+        express.static(distPath)(req, res, next);
+      }
+    });
+    // Add a catch-all for SPA in production for non-api routes
+    expressApp.use((req, res, next) => {
+      if (!req.url.startsWith('/api')) {
+        res.sendFile(path.join(distPath, 'index.html'));
+      } else {
+        next();
+      }
+    });
   }
 
   await app.listen(port, '0.0.0.0');

@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { PluginRole, UserContext } from '../core/kernel/types';
 import { outboxSyncEngine } from '../infrastructure/sync/outbox-sync-engine';
 import { setAuthToken, ensureAuthenticated } from '../infrastructure/auth/auth-token-store';
-
 import {
   HeartHandshake,
   User,
@@ -16,6 +15,7 @@ import {
   ChevronDown,
   UserCheck,
   Shield,
+  LogOut,
 } from 'lucide-react';
 
 export interface PanelDefinition {
@@ -34,57 +34,35 @@ export const ALL_PANELS: PanelDefinition[] = [
 ];
 
 export function computeAllowedPanels(user: UserContext): PanelDefinition[] {
+  const allowed: PanelDefinition[] = [];
   const baseRole = user.role;
-  const userPanels = user.visiblePanels || [];
 
-  return ALL_PANELS.filter((panel) => {
-    // Admin panel is GATED STRICTLY by isAdmin, NEVER by visiblePanels
-    if (panel.adminOnly) {
-      return Boolean(user.isAdmin);
+  if (baseRole === 'patient') {
+    allowed.push(ALL_PANELS.find((p) => p.id === 'patient')!);
+  } else if (baseRole === 'therapist') {
+    allowed.push(ALL_PANELS.find((p) => p.id === 'therapist')!);
+  }
+
+  if (user.visiblePanels && Array.isArray(user.visiblePanels)) {
+    for (const panelName of user.visiblePanels) {
+      if (panelName === 'reception' && !allowed.some((p) => p.id === 'receptionist')) {
+        allowed.push(ALL_PANELS.find((p) => p.id === 'receptionist')!);
+      }
+      if (panelName === 'patient' && !allowed.some((p) => p.id === 'patient')) {
+        allowed.push(ALL_PANELS.find((p) => p.id === 'patient')!);
+      }
+      if (panelName === 'therapist' && !allowed.some((p) => p.id === 'therapist')) {
+        allowed.push(ALL_PANELS.find((p) => p.id === 'therapist')!);
+      }
     }
-    const target = panel.requiredRoleOrPanel || panel.id;
-    return baseRole === target || userPanels.includes(target);
-  });
-}
+  }
 
-const STATIC_DEMO_USERS: UserContext[] = [
-  {
-    id: 'user-therapist',
-    name: 'دکتر علیرضا محمدی',
-    role: 'therapist',
-    email: 'therapist@saman.ir',
-    isAdmin: true,
-    visiblePanels: null,
-    tenantId: 'clinic-main',
-  },
-  {
-    id: 'user-therapist-multi',
-    name: 'دکتر سمیعی (حساب آزمایشی چندپنله)',
-    role: 'therapist',
-    email: 'therapist.test@saman.ir',
-    isAdmin: false,
-    visiblePanels: ['reception', 'patient', 'therapist'],
-    tenantId: 'clinic-main',
-  },
-  {
-    id: 'user-patient',
-    name: 'سارا احمدی',
-    role: 'patient',
-    email: 'patient@saman.ir',
-    isAdmin: false,
-    visiblePanels: null,
-    tenantId: 'clinic-main',
-  },
-  {
-    id: 'user-receptionist',
-    name: 'خانم شریفی (پذیرش)',
-    role: 'therapist',
-    email: 'reception@saman.ir',
-    isAdmin: false,
-    visiblePanels: ['reception'],
-    tenantId: 'clinic-main',
-  },
-];
+  if (user.isAdmin) {
+    allowed.push(ALL_PANELS.find((p) => p.id === 'admin')!);
+  }
+
+  return allowed;
+}
 
 interface HeaderNavProps {
   currentUser: UserContext;
@@ -93,6 +71,7 @@ interface HeaderNavProps {
   onRoleChange: (role: PluginRole) => void;
   onOpenAuditLogs: () => void;
   onOpenSyncQueue: () => void;
+  onLogout?: () => void;
 }
 
 export const HeaderNav: React.FC<HeaderNavProps> = ({
@@ -102,41 +81,38 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   onRoleChange,
   onOpenAuditLogs,
   onOpenSyncQueue,
+  onLogout,
 }) => {
-  const isDevelopment = process.env.NODE_ENV !== 'production';
-
   const [pendingCount, setPendingCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
-  const [allUsers, setAllUsers] = useState<UserContext[]>(STATIC_DEMO_USERS);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [allUsers, setAllUsers] = useState<UserContext[]>([]);
 
-  const updateCount = async () => {
-    const count = await outboxSyncEngine.getPendingCount();
-    setPendingCount(count);
-  };
-
-  const fetchUsers = async () => {
-    // Only in development and when current user is Admin
-    if (!isDevelopment || !currentUser.isAdmin) return;
-    try {
-      const token = await ensureAuthenticated();
-      const res = await fetch('/api/users', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setAllUsers(data);
-      }
-    } catch {
-      // Fallback
-    }
-  };
+  const isDevelopment = import.meta.env.MODE !== 'production';
 
   useEffect(() => {
+    const updateCount = () => {
+      setPendingCount(outboxSyncEngine.getPendingCount());
+    };
     updateCount();
+
+    const fetchUsers = async () => {
+      try {
+        const token = ensureAuthenticated();
+        const res = await fetch('/api/users', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setAllUsers(data);
+        }
+      } catch {}
+    };
+
     if (isDevelopment && currentUser.isAdmin) {
       fetchUsers();
     }
+
     const unsub = outboxSyncEngine.subscribe(() => updateCount());
     return () => unsub();
   }, [currentUser.isAdmin, isDevelopment]);
@@ -169,13 +145,9 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
           token: data.token,
         });
       }
-      // If login-as fails, do NOT locally switch identity without a genuine token
-    } catch {
-      // Do nothing if login-as call errors out
-    }
+    } catch {}
   };
 
-  // Compute Allowed Panels for current user dynamically
   const visiblePanels = computeAllowedPanels(currentUser);
 
   return (
@@ -322,12 +294,25 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
             className="flex items-center gap-1 px-3 py-1.5 bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/30 text-indigo-300 rounded-xl transition-all"
           >
             <FileCheck2 className="w-3.5 h-3.5" />
-            لاگ لاینظر (Audit)
+            لاگ (Audit)
           </button>
+
+          {/* Logout Button */}
+          {onLogout && (
+            <button
+              type="button"
+              onClick={onLogout}
+              className="flex items-center gap-1 px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/30 text-rose-300 rounded-xl transition-all"
+              title="خروج از حساب کاربری"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              خروج
+            </button>
+          )}
 
           <span className="flex items-center gap-1 text-[11px] bg-slate-800 px-2.5 py-1.5 rounded-xl text-emerald-400 border border-slate-700">
             <Wifi className="w-3 h-3" />
-            آفلاین آماده
+            آفلاین
           </span>
         </div>
       </div>

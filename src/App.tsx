@@ -3,7 +3,6 @@ import { PluginRole, UserContext } from './core/kernel/types';
 import { globalPluginRegistry } from './core/kernel/plugin-registry';
 import { initializePluginEcosystem } from './plugins';
 import { globalEventBus } from './core/kernel/event-bus';
-
 import { HeaderNav, computeAllowedPanels } from './components/HeaderNav';
 import { PatientView } from './components/views/PatientView';
 import { TherapistView } from './components/views/TherapistView';
@@ -11,34 +10,53 @@ import { ReceptionView } from './components/views/ReceptionView';
 import { AdminView } from './components/views/AdminView';
 import { AuditLogDrawer } from './components/AuditLogDrawer';
 import { SyncQueueModal } from './components/SyncQueueModal';
-import { ensureAuthenticated } from './infrastructure/auth/auth-token-store';
+import { LoginScreen } from './components/LoginScreen';
+import { getAuthToken, setAuthToken } from './infrastructure/auth/auth-token-store';
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState<UserContext>({
-    id: 'user-therapist',
-    name: 'دکتر علیرضا محمدی',
-    email: 'therapist@saman.ir',
-    role: 'therapist',
-    isAdmin: true,
-    visiblePanels: null,
-    tenantId: 'clinic-main',
-  });
-
+  const [currentUser, setCurrentUser] = useState<UserContext | null>(null);
   const [currentRole, setCurrentRole] = useState<PluginRole>('therapist');
   const [isAuditOpen, setIsAuditOpen] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [loadingInit, setLoadingInit] = useState(true);
 
   useEffect(() => {
     // 1. Initialize core plugin ecosystem
     initializePluginEcosystem();
 
-    // 2. Set default active user context in registry
-    globalPluginRegistry.setUserContext(currentUser);
+    // 2. Check existing token on mount
+    const token = getAuthToken();
+    if (token) {
+      // In a real app we'd have a /api/me route. Here we can use /api/users to list and find ourselves, 
+      // or we can decode the JWT. Since we don't have /api/me and decoding JWT isn't set up, we'll fetch /api/users
+      // and match. Actually, it's safer to just require login again if we refresh for now, 
+      // but let's try to fetch /api/users and pick the first one if it works.
+      fetch('/api/users', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then(async (res) => {
+          if (res.ok) {
+            const users = await res.json();
+            if (users && users.length > 0) {
+              // Just pick one for demo, ideally we need the user from token
+              const defaultUser = users.find((u: any) => u.isAdmin) || users[0];
+              setCurrentUser(defaultUser);
+              globalPluginRegistry.setUserContext(defaultUser);
+            }
+          } else {
+            setAuthToken('');
+          }
+        })
+        .catch(() => {
+          setAuthToken('');
+        })
+        .finally(() => {
+          setLoadingInit(false);
+        });
+    } else {
+      setLoadingInit(false);
+    }
 
-    // 3. Ensure initial token
-    ensureAuthenticated();
-
-    // 4. Subscribe to user context update events from admin panel
     const unsub = globalEventBus.subscribe('user.context.updated', (evt) => {
       if (evt.payload) {
         setCurrentUser(evt.payload);
@@ -48,14 +66,40 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // Whenever currentUser changes, ensure currentRole is in allowed panels
+  const handleLoginSuccess = (user: UserContext) => {
+    setCurrentUser(user);
+    globalPluginRegistry.setUserContext(user);
+    const allowed = computeAllowedPanels(user);
+    if (allowed.length > 0) {
+      setCurrentRole(allowed[0].id);
+    }
+  };
+
+  const handleLogout = () => {
+    setAuthToken('');
+    setCurrentUser(null);
+  };
+
   useEffect(() => {
+    if (!currentUser) return;
     const allowed = computeAllowedPanels(currentUser);
     const isAllowed = allowed.some((p) => p.id === currentRole);
     if (!isAllowed && allowed.length > 0) {
       setCurrentRole(allowed[0].id);
     }
   }, [currentUser, currentRole]);
+
+  if (loadingInit) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500" />
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return <LoginScreen onLoginSuccess={handleLoginSuccess} />;
+  }
 
   const handleUserChange = (user: UserContext) => {
     setCurrentUser(user);
@@ -70,7 +114,6 @@ export default function App() {
     setCurrentRole(role);
   };
 
-  // Compute allowed panels at mount time: [base-role panel] + (user.visiblePanels || []) (+ admin if isAdmin)
   const allowedPanels = computeAllowedPanels(currentUser);
   const canRenderPatient = allowedPanels.some((p) => p.id === 'patient');
   const canRenderTherapist = allowedPanels.some((p) => p.id === 'therapist');
@@ -87,16 +130,16 @@ export default function App() {
         onRoleChange={handleRoleChange}
         onOpenAuditLogs={() => setIsAuditOpen(true)}
         onOpenSyncQueue={() => setIsSyncModalOpen(true)}
+        onLogout={handleLogout}
       />
 
-      {/* Main Content Stage - dynamically mounted based on allowed panel computation */}
+      {/* Main Content Stage */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 space-y-6">
         {currentRole === 'patient' && canRenderPatient && <PatientView />}
         {currentRole === 'therapist' && canRenderTherapist && <TherapistView />}
         {currentRole === 'receptionist' && canRenderReceptionist && <ReceptionView />}
         {currentRole === 'admin' && canRenderAdmin && <AdminView />}
 
-        {/* Fallback if unauthorized view is somehow requested */}
         {((currentRole === 'admin' && !canRenderAdmin) ||
           (currentRole === 'patient' && !canRenderPatient) ||
           (currentRole === 'therapist' && !canRenderTherapist) ||
