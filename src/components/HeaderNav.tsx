@@ -34,10 +34,8 @@ export const ALL_PANELS: PanelDefinition[] = [
 ];
 
 export function computeAllowedPanels(user: UserContext): PanelDefinition[] {
-  const baseRole = user.role === 'receptionist' ? 'reception' : user.role;
-  const userPanels = (user.visiblePanels || []).map((p) =>
-    p === 'receptionist' ? 'reception' : p
-  );
+  const baseRole = user.role;
+  const userPanels = user.visiblePanels || [];
 
   return ALL_PANELS.filter((panel) => {
     // Admin panel is GATED STRICTLY by isAdmin, NEVER by visiblePanels
@@ -50,15 +48,6 @@ export function computeAllowedPanels(user: UserContext): PanelDefinition[] {
 }
 
 const STATIC_DEMO_USERS: UserContext[] = [
-  {
-    id: 'user-admin',
-    name: 'مدیر ارشد سیستم (Admin)',
-    role: 'admin',
-    email: 'admin@saman.ir',
-    isAdmin: true,
-    visiblePanels: null,
-    tenantId: 'clinic-main',
-  },
   {
     id: 'user-therapist',
     name: 'دکتر علیرضا محمدی',
@@ -89,10 +78,10 @@ const STATIC_DEMO_USERS: UserContext[] = [
   {
     id: 'user-receptionist',
     name: 'خانم شریفی (پذیرش)',
-    role: 'receptionist',
+    role: 'therapist',
     email: 'reception@saman.ir',
     isAdmin: false,
-    visiblePanels: null,
+    visiblePanels: ['reception'],
     tenantId: 'clinic-main',
   },
 ];

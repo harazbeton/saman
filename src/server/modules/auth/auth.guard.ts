@@ -13,11 +13,7 @@ import { verifyToken } from '../../auth';
 import { userRepository } from '../../repositories/user.repository';
 
 function normalizeRoleOrPanel(val: string): string {
-  const lower = (val || '').toLowerCase().trim();
-  if (lower === 'receptionist' || lower === 'reception') {
-    return 'reception';
-  }
-  return lower;
+  return (val || '').toLowerCase().trim();
 }
 
 @Injectable()

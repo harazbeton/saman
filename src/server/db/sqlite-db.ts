@@ -143,6 +143,11 @@ export async function getSqliteDb(customPath?: string): Promise<Database> {
     );
   `);
 
+  // Clean up legacy accounts / architecture drift if present in existing DB
+  dbInstance.run("DELETE FROM users WHERE id = 'user-admin' OR role = 'admin'");
+  dbInstance.run("UPDATE users SET role = 'therapist', visiblePanels = ? WHERE id = 'user-receptionist'", [JSON.stringify(['reception'])]);
+  dbInstance.run("UPDATE users SET role = 'therapist' WHERE role = 'receptionist'");
+
   // Seed default users if table is empty
   const userCheckStmt = dbInstance.prepare('SELECT COUNT(*) as cnt FROM users');
   let userCount = 0;
@@ -186,18 +191,9 @@ export async function getSqliteDb(customPath?: string): Promise<Database> {
         id: 'user-receptionist',
         name: 'خانم شریفی (پذیرش)',
         email: 'reception@saman.ir',
-        role: 'receptionist',
+        role: 'therapist',
         isAdmin: 0,
-        visiblePanels: null,
-        password: 'saman123',
-      },
-      {
-        id: 'user-admin',
-        name: 'مدیر ارشد سیستم (Admin)',
-        email: 'admin@saman.ir',
-        role: 'admin',
-        isAdmin: 1,
-        visiblePanels: null,
+        visiblePanels: JSON.stringify(['reception']),
         password: 'saman123',
       },
     ];

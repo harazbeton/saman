@@ -60,7 +60,7 @@ export interface User extends SyncMetadata {
   id: string;
   name: string;
   email: string;
-  role: 'therapist' | 'patient' | 'receptionist' | 'admin';
+  role: 'therapist' | 'patient';
   isAdmin: boolean;
   visiblePanels: string[] | null;
   tenantId: string;

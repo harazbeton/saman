@@ -45,9 +45,13 @@ async function runE2EVerticalSliceTest() {
     const loginRes = await fetch(`${baseUrl}/api/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: 'saman123' }),
+      body: JSON.stringify({ password: process.env.THERAPIST_PASSWORD || 'Amirsalim9' }),
     });
-    const { token } = await loginRes.json();
+    const loginData = await loginRes.json();
+    const token = loginData.token;
+    if (!token) {
+      console.error('Login failed response:', loginData);
+    }
     assert(!!token, 'Auth: Received valid JWT token from /api/login');
 
     const headers = {

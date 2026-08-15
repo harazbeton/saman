@@ -1,5 +1,8 @@
 # Saman Platform - Architectural Roadmap & Status
 
+## 🚀 Pre-Launch Security Checklist
+- **Rotate the seeded therapist password before any real patient data is entered — current password was shared in plaintext during development.**
+
 ## ✅ Completed Milestones
 
 ### 1. SQLite AES-256-GCM Database Encryption at Rest

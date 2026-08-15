@@ -55,25 +55,20 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
 
 export function handleLogin(req: Request, res: Response) {
   const { password, userId } = req.body || {};
-  const validPasswords = [
-    THERAPIST_PASSWORD,
-    'saman123',
-    'Amirsalim9',
-  ].filter(Boolean);
 
-  if (!password || !validPasswords.includes(password)) {
+  if (!password || password !== THERAPIST_PASSWORD) {
     return res.status(401).json({ error: 'Invalid credentials' });
   }
 
   const targetUserId = userId || 'user-therapist';
-  const role = targetUserId === 'user-admin' ? 'admin' : 'therapist';
-  const isAdmin = targetUserId === 'user-admin';
+  const role = 'therapist';
+  const isAdmin = true;
 
   const token = generateToken({
     userId: targetUserId,
     role,
     isAdmin,
-    user: targetUserId === 'user-admin' ? 'admin' : 'dr_mohammadi',
+    user: 'dr_mohammadi',
     issuedAt: new Date().toISOString(),
   });
 
@@ -82,7 +77,7 @@ export function handleLogin(req: Request, res: Response) {
     token,
     user: {
       id: targetUserId,
-      name: targetUserId === 'user-admin' ? 'مدیر ارشد سیستم' : 'دکتر علیرضا محمدی',
+      name: 'دکتر علیرضا محمدی',
       role,
       isAdmin,
     },

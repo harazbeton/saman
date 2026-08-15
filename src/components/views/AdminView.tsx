@@ -254,9 +254,7 @@ export const AdminView: React.FC = () => {
                     <div className="flex flex-wrap items-center gap-4">
                       {AVAILABLE_PANELS.map((panel) => {
                         const isChecked = currentPanels.includes(panel.id);
-                        const isBaseRole =
-                          (panel.id === 'reception' && (u.role === 'receptionist' || u.role === 'reception')) ||
-                          panel.id === u.role;
+                        const isBaseRole = panel.id === u.role;
 
                         return (
                           <label
