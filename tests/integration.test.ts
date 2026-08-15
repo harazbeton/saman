@@ -1,9 +1,10 @@
-import express from 'express';
-import http from 'http';
+import 'reflect-metadata';
+import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
-
-import { authMiddleware, handleLogin, generateToken } from '../src/server/auth';
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from '../src/server/app.module';
+import { generateToken } from '../src/server/auth';
 import { patientRepository } from '../src/server/repositories/patient.repository';
 import { clinicalNoteRepository } from '../src/server/repositories/clinical-note.repository';
 import { moodLogRepository } from '../src/server/repositories/mood-log.repository';
@@ -12,7 +13,7 @@ import { auditLogRepository } from '../src/server/repositories/audit-log.reposit
 import { getSqliteDb, closeSqliteDb } from '../src/server/db/sqlite-db';
 
 async function runIntegrationTests() {
-  console.log('=============== STARTING SAMAN INTEGRATION TESTS ===============\n');
+  console.log('=============== STARTING SAMAN INTEGRATION TESTS (NestJS) ===============\n');
 
   const testDbPath = path.join(process.cwd(), 'data', 'saman_test.db');
 
@@ -24,69 +25,10 @@ async function runIntegrationTests() {
   // Initialize SQLite with test path
   await getSqliteDb(testDbPath);
 
-  // Setup Test Express App
-  const app = express();
-  app.use(express.json());
-  app.use(authMiddleware);
-
-  app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', storage: 'SQLite ./data/saman_test.db' });
-  });
-
-  app.post('/api/login', handleLogin);
-
-  app.post('/api/ai/gateway', (req, res) => {
-    const { action } = req.body;
-    res.json({ result: `Test response for ${action}` });
-  });
-
-  app.post('/api/sync/outbox', async (req, res) => {
-    const { items } = req.body;
-    if (!Array.isArray(items)) return res.status(400).json({ error: 'items must be an array' });
-
-    const syncedIds: string[] = [];
-
-    for (const item of items) {
-      try {
-        if (item.aggregateType === 'Patient') {
-          await patientRepository.save(item.payload);
-          syncedIds.push(item.id);
-        } else if (item.aggregateType === 'ClinicalNote') {
-          await clinicalNoteRepository.save(item.payload);
-          syncedIds.push(item.id);
-        } else if (item.aggregateType === 'MoodLog') {
-          await moodLogRepository.save(item.payload);
-          syncedIds.push(item.id);
-        } else if (item.aggregateType === 'Appointment') {
-          await appointmentRepository.save(item.payload);
-          syncedIds.push(item.id);
-        } else {
-          console.error(
-            `[TEST LOG] Unrecognized aggregate type for outbox item ${item.id}: '${item.aggregateType}'`
-          );
-        }
-      } catch (err: any) {
-        console.error(`Failed to persist item ${item.id}:`, err);
-      }
-    }
-
-    res.json({ status: 'success', syncedIds });
-  });
-
-  app.post('/api/audit-logs', async (req, res) => {
-    await auditLogRepository.save(req.body);
-    res.json({ status: 'logged', id: req.body.id });
-  });
-
-  app.get('/api/audit-logs', async (req, res) => {
-    const logs = await auditLogRepository.findAll();
-    res.json(logs);
-  });
-
-  // Start HTTP Server on port 3001
+  // Setup Test NestJS App
+  const app = await NestFactory.create(AppModule, { logger: false });
   const TEST_PORT = 3001;
-  const server = http.createServer(app);
-  await new Promise<void>((resolve) => server.listen(TEST_PORT, resolve));
+  await app.listen(TEST_PORT, '0.0.0.0');
 
   const baseUrl = `http://localhost:${TEST_PORT}`;
   let passedCount = 0;
@@ -104,7 +46,7 @@ async function runIntegrationTests() {
 
   try {
     // TEST 1: GET /api/health (Public)
-    console.log('[1/8] Testing GET /api/health (Public Endpoint)...');
+    console.log('[1/10] Testing GET /api/health (Public Endpoint)...');
     const res1 = await fetch(`${baseUrl}/api/health`);
     const data1 = await res1.json();
     assert(
@@ -113,7 +55,7 @@ async function runIntegrationTests() {
     );
 
     // TEST 2: Unauthenticated Request Rejection (401)
-    console.log('[2/8] Testing Unauthenticated Request Rejection (401)...');
+    console.log('[2/10] Testing Unauthenticated Request Rejection (401)...');
     const res2 = await fetch(`${baseUrl}/api/sync/outbox`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -122,7 +64,7 @@ async function runIntegrationTests() {
     assert(res2.status === 401, 'Protected endpoint /api/sync/outbox rejects missing token with 401');
 
     // TEST 3: Invalid Login Request (401)
-    console.log('[3/8] Testing POST /api/login with invalid password...');
+    console.log('[3/10] Testing POST /api/login with invalid password...');
     const res3 = await fetch(`${baseUrl}/api/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -131,7 +73,7 @@ async function runIntegrationTests() {
     assert(res3.status === 401, 'Login rejects invalid password with 401');
 
     // TEST 4: Valid Login Request (200 & JWT Token)
-    console.log('[4/8] Testing POST /api/login with valid password...');
+    console.log('[4/10] Testing POST /api/login with valid password...');
     const res4 = await fetch(`${baseUrl}/api/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -144,20 +86,92 @@ async function runIntegrationTests() {
       'Login succeeds and returns valid JWT session token'
     );
 
-    // TEST 5: Authenticated POST /api/ai/gateway
-    console.log('[5/8] Testing Authenticated POST /api/ai/gateway...');
-    const res5 = await fetch(`${baseUrl}/api/ai/gateway`, {
+    // TEST 5: Authenticated Live Gemini AI Gateway Calls (Chat & Summarize)
+    console.log('[5/10] Testing Authenticated Live Gemini AI Gateway Calls (Chat & Summarize)...');
+    const resChat = await fetch(`${baseUrl}/api/ai/gateway`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ action: 'chatCompanion', payload: { patientName: 'سارا' } }),
+      body: JSON.stringify({
+        action: 'chatCompanion',
+        payload: {
+          patientName: 'سارا',
+          messages: [{ role: 'user', content: 'سلام، امروز کمی مضطرب هستم.' }],
+        },
+      }),
     });
-    assert(res5.status === 200, 'Authenticated AI Gateway endpoint returns 200 OK');
+    const dataChat = await resChat.json();
+    const hasApiKey = !!process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY';
 
-    // TEST 6: Outbox Sync Bug Fix & Multi-Aggregate Persistence
-    console.log('[6/8] Testing Outbox Sync with Patient, ClinicalNote, MoodLog, Appointment, and Unrecognized type...');
+    if (hasApiKey) {
+      assert(
+        resChat.status === 200 &&
+          dataChat.source === 'gemini' &&
+          typeof dataChat.result === 'string' &&
+          dataChat.result.length > 0,
+        'Live Gemini API Chat: Confirmed genuine response (source: "gemini")'
+      );
+
+      const resSum = await fetch(`${baseUrl}/api/ai/gateway`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          action: 'summarizeSession',
+          payload: {
+            patientName: 'سارا',
+            sessionNotes: 'مراجع از علائم اضطراب در محیط کار صحبت کرد.',
+          },
+        }),
+      });
+      const dataSum = await resSum.json();
+      assert(
+        resSum.status === 200 &&
+          dataSum.source === 'gemini' &&
+          typeof dataSum.result === 'object' &&
+          !!dataSum.result.summary,
+        'Live Gemini API Summarization: Confirmed genuine response (source: "gemini")'
+      );
+    } else {
+      assert(resChat.status === 200 && dataChat.source === 'fallback', 'AI Gateway fallback triggered gracefully');
+    }
+
+    // TEST 6: Dedicated AI Gateway Fallback Path Verification
+    console.log('[6/10] Testing Dedicated AI Gateway Fallback Path Verification...');
+    const originalApiKey = process.env.GEMINI_API_KEY;
+    try {
+      // Temporarily clear API key to simulate missing key/offline scenario
+      delete process.env.GEMINI_API_KEY;
+      const resFallback = await fetch(`${baseUrl}/api/ai/gateway`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          action: 'chatCompanion',
+          payload: { patientName: 'سارا' },
+        }),
+      });
+      const dataFallback = await resFallback.json();
+      assert(
+        resFallback.status === 200 &&
+          dataFallback.source === 'fallback' &&
+          typeof dataFallback.result === 'string' &&
+          dataFallback.result.includes('متوجهم سارا') &&
+          dataFallback.result.includes('احساسات و تجربیاتی'),
+        'Dedicated Fallback Path: Verified deterministic fallback response (source: "fallback")'
+      );
+    } finally {
+      process.env.GEMINI_API_KEY = originalApiKey;
+    }
+
+    // TEST 7: Outbox Sync Bug Fix & Multi-Aggregate Persistence
+    console.log('[7/10] Testing Outbox Sync with Patient, ClinicalNote, MoodLog, Appointment, and Unrecognized type...');
     const testItems = [
       { id: 'outbox-p1', aggregateType: 'Patient', payload: { id: 'patient-101', name: 'سارا احمدی' } },
       { id: 'outbox-n1', aggregateType: 'ClinicalNote', payload: { id: 'note-201', content: 'جلسه CBT بررسی اضطراب' } },
@@ -166,7 +180,7 @@ async function runIntegrationTests() {
       { id: 'outbox-x1', aggregateType: 'UnknownType', payload: { id: 'unk-999' } },
     ];
 
-    const res6 = await fetch(`${baseUrl}/api/sync/outbox`, {
+    const res7 = await fetch(`${baseUrl}/api/sync/outbox`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -174,8 +188,8 @@ async function runIntegrationTests() {
       },
       body: JSON.stringify({ items: testItems }),
     });
-    const data6 = await res6.json();
-    const syncedIds: string[] = data6.syncedIds || [];
+    const data7 = await res7.json();
+    const syncedIds: string[] = data7.syncedIds || [];
 
     const p1Saved = await patientRepository.findById('patient-101');
     const n1Saved = await clinicalNoteRepository.findById('note-201');
@@ -199,8 +213,8 @@ async function runIntegrationTests() {
       'All 4 aggregate types were correctly persisted to SQLite via repositories'
     );
 
-    // TEST 7: Audit Log Persistence & Retrieval
-    console.log('[7/8] Testing Audit Log Persistence & Retrieval...');
+    // TEST 8: Audit Log Persistence & Retrieval
+    console.log('[8/10] Testing Audit Log Persistence & Retrieval...');
     const auditEntry = {
       id: 'audit-test-01',
       userId: 'therapist-01',
@@ -222,17 +236,17 @@ async function runIntegrationTests() {
       body: JSON.stringify(auditEntry),
     });
 
-    const res7 = await fetch(`${baseUrl}/api/audit-logs`, {
+    const res8 = await fetch(`${baseUrl}/api/audit-logs`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    const logs7 = await res7.json();
+    const logs8 = await res8.json();
     assert(
-      Array.isArray(logs7) && logs7.some((l: any) => l.id === 'audit-test-01'),
+      Array.isArray(logs8) && logs8.some((l: any) => l.id === 'audit-test-01'),
       'Audit log persisted to SQLite and retrieved via GET endpoint'
     );
 
-    // TEST 8: Hard Restart & SQLite Disk Persistence Verification
-    console.log('[8/9] Testing Hard Restart & SQLite Disk Persistence...');
+    // TEST 9: Hard Restart & SQLite Disk Persistence Verification
+    console.log('[9/10] Testing Hard Restart & SQLite Disk Persistence...');
     closeSqliteDb();
     // Re-open SQLite from disk file
     await getSqliteDb(testDbPath);
@@ -243,10 +257,10 @@ async function runIntegrationTests() {
       'Data persisted to SQLite disk file survives server DB restart'
     );
 
-    // TEST 9: Expired JWT Token Rejection (401)
-    console.log('[9/9] Testing Expired JWT Token Rejection (401)...');
+    // TEST 10: Expired JWT Token Rejection (401)
+    console.log('[10/10] Testing Expired JWT Token Rejection (401)...');
     const expiredToken = generateToken({ role: 'therapist', user: 'dr_mohammadi' }, '-1s');
-    const res9 = await fetch(`${baseUrl}/api/sync/outbox`, {
+    const res10 = await fetch(`${baseUrl}/api/sync/outbox`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -255,7 +269,7 @@ async function runIntegrationTests() {
       body: JSON.stringify({ items: [] }),
     });
     assert(
-      res9.status === 401,
+      res10.status === 401,
       'Expired JWT token is rejected with status 401 Unauthorized'
     );
 
@@ -263,7 +277,7 @@ async function runIntegrationTests() {
     console.error('Test execution error:', err);
     failedCount++;
   } finally {
-    server.close();
+    await app.close();
     closeSqliteDb();
     if (fs.existsSync(testDbPath)) {
       fs.unlinkSync(testDbPath);

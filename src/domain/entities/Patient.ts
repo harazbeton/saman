@@ -55,3 +55,14 @@ export interface MoodLog extends SyncMetadata {
   note?: string;
   tenantId: string;
 }
+
+export interface User extends SyncMetadata {
+  id: string;
+  name: string;
+  email: string;
+  role: 'therapist' | 'patient' | 'receptionist' | 'admin';
+  isAdmin: boolean;
+  visiblePanels: string[] | null;
+  tenantId: string;
+  password?: string;
+}

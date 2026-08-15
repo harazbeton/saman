@@ -1,6 +1,8 @@
+import { Injectable } from '@nestjs/common';
 import { IBaseRepository } from './base-repository.interface';
 import { getSqliteDb, persistDbToDisk } from '../db/sqlite-db';
 
+@Injectable()
 export class MoodLogRepository implements IBaseRepository<any> {
   async save(log: any): Promise<any> {
     const db = await getSqliteDb();

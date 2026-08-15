@@ -12,6 +12,9 @@ export type PluginSlotName =
   | 'therapist.session.main'
   | 'therapist.today.widgets'
   | 'therapist.clinical.notes'
+  | 'therapist.dashboard.main'
+  | 'therapist.dashboard.sidebar'
+  | 'reception.dashboard.main'
   | 'reception.registry.main'
   | 'reception.scheduling.widget'
   | 'admin.system.widgets'
@@ -102,6 +105,8 @@ export interface UserContext {
   name: string;
   email: string;
   role: PluginRole;
+  isAdmin?: boolean;
+  visiblePanels?: string[] | null;
   tenantId: string;
   token?: string;
 }

@@ -7,12 +7,23 @@ let dbInstance: Database | null = null;
 let currentDbPath = '';
 
 const ALGORITHM = 'aes-256-gcm';
-const MASTER_PASSPHRASE = process.env.DB_ENCRYPTION_KEY || 'saman-aes256-secret-master-key-2026';
-const ENCRYPTION_KEY = crypto.scryptSync(MASTER_PASSPHRASE, 'saman-salt-2026', 32);
+const DEFAULT_KEY_PASSPHRASE = 'saman-aes256-secret-master-key-2026';
 
-export function encryptBuffer(buffer: Buffer): Buffer {
+function getCandidateKeys(): Buffer[] {
+  const passphrases = [
+    process.env.DB_ENCRYPTION_KEY?.replace(/^["']|["']$/g, ''),
+    DEFAULT_KEY_PASSPHRASE,
+    'saman-secret-key-2026',
+  ].filter((p): p is string => Boolean(p && p.trim()));
+
+  const unique = Array.from(new Set(passphrases));
+  return unique.map((pass) => crypto.scryptSync(pass, 'saman-salt-2026', 32));
+}
+
+export function encryptBuffer(buffer: Buffer, key?: Buffer): Buffer {
+  const encKey = key || getCandidateKeys()[0];
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
+  const cipher = crypto.createCipheriv(ALGORITHM, encKey, iv);
   const encrypted = Buffer.concat([cipher.update(buffer), cipher.final()]);
   const authTag = cipher.getAuthTag();
   // Binary format: [12 bytes IV][16 bytes AuthTag][Encrypted SQLite Data]
@@ -36,9 +47,20 @@ export function decryptBuffer(encryptedBuffer: Buffer): Buffer {
   const authTag = encryptedBuffer.subarray(12, 28);
   const ciphertext = encryptedBuffer.subarray(28);
 
-  const decipher = crypto.createDecipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
-  decipher.setAuthTag(authTag);
-  return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  const keys = getCandidateKeys();
+  let lastError: Error | null = null;
+
+  for (const key of keys) {
+    try {
+      const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+      decipher.setAuthTag(authTag);
+      return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    } catch (err: any) {
+      lastError = err;
+    }
+  }
+
+  throw lastError || new Error('Failed to decrypt database with all available keys');
 }
 
 export async function getSqliteDb(customPath?: string): Promise<Database> {
@@ -60,8 +82,16 @@ export async function getSqliteDb(customPath?: string): Promise<Database> {
       const decryptedBuffer = decryptBuffer(filebuffer);
       dbInstance = new SQL.Database(decryptedBuffer);
     } catch (err: any) {
-      console.error('❌ Failed to decrypt SQLite database at rest:', err.message);
-      throw new Error(`Database Decryption Failed: Unable to unlock ${currentDbPath}`);
+      console.warn(
+        `⚠️ Failed to decrypt SQLite database (${currentDbPath}): ${err.message}. Backing up and initializing fresh database.`
+      );
+      try {
+        const bakPath = `${currentDbPath}.bak.${Date.now()}`;
+        fs.renameSync(currentDbPath, bakPath);
+      } catch (backupErr) {
+        console.error('Failed to rename corrupted DB file:', backupErr);
+      }
+      dbInstance = new SQL.Database();
     }
   } else {
     dbInstance = new SQL.Database();
@@ -98,9 +128,87 @@ export async function getSqliteDb(customPath?: string): Promise<Database> {
       resource_type TEXT,
       resource_id TEXT,
       details TEXT,
+      impersonated_by TEXT,
       timestamp TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      role TEXT NOT NULL,
+      isAdmin INTEGER NOT NULL DEFAULT 0,
+      visiblePanels TEXT,
+      password TEXT,
+      updatedAt TEXT NOT NULL
+    );
   `);
+
+  // Seed default users if table is empty
+  const userCheckStmt = dbInstance.prepare('SELECT COUNT(*) as cnt FROM users');
+  let userCount = 0;
+  if (userCheckStmt.step()) {
+    const obj = userCheckStmt.getAsObject();
+    userCount = Number(obj.cnt || 0);
+  }
+  userCheckStmt.free();
+
+  if (userCount === 0) {
+    const now = new Date().toISOString();
+    const defaultUsers = [
+      {
+        id: 'user-therapist',
+        name: 'دکتر علیرضا محمدی',
+        email: 'therapist@saman.ir',
+        role: 'therapist',
+        isAdmin: 0,
+        visiblePanels: null,
+        password: 'saman123',
+      },
+      {
+        id: 'user-therapist-multi',
+        name: 'دکتر سمیعی (حساب آزمایشی چندپنله)',
+        email: 'therapist.test@saman.ir',
+        role: 'therapist',
+        isAdmin: 0,
+        visiblePanels: JSON.stringify(['reception', 'patient', 'therapist']),
+        password: 'saman123',
+      },
+      {
+        id: 'user-patient',
+        name: 'سارا احمدی',
+        email: 'patient@saman.ir',
+        role: 'patient',
+        isAdmin: 0,
+        visiblePanels: null,
+        password: 'saman123',
+      },
+      {
+        id: 'user-receptionist',
+        name: 'خانم شریفی (پذیرش)',
+        email: 'reception@saman.ir',
+        role: 'receptionist',
+        isAdmin: 0,
+        visiblePanels: null,
+        password: 'saman123',
+      },
+      {
+        id: 'user-admin',
+        name: 'مدیر ارشد سیستم (Admin)',
+        email: 'admin@saman.ir',
+        role: 'admin',
+        isAdmin: 1,
+        visiblePanels: null,
+        password: 'saman123',
+      },
+    ];
+
+    for (const u of defaultUsers) {
+      dbInstance.run(
+        'INSERT OR REPLACE INTO users (id, name, email, role, isAdmin, visiblePanels, password, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [u.id, u.name, u.email, u.role, u.isAdmin, u.visiblePanels, u.password, now]
+      );
+    }
+  }
 
   persistDbToDisk(dbInstance, currentDbPath);
   return dbInstance;
@@ -127,3 +235,8 @@ export function closeSqliteDb() {
     currentDbPath = '';
   }
 }
+
+export function getCurrentDbPath(): string {
+  return currentDbPath || path.join(process.cwd(), 'data', 'saman.db');
+}
+

@@ -1,19 +1,14 @@
-import express from 'express';
-import http from 'http';
+import 'reflect-metadata';
+import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
-
-import { authMiddleware, handleLogin, generateToken } from '../src/server/auth';
-import { patientRepository } from '../src/server/repositories/patient.repository';
-import { clinicalNoteRepository } from '../src/server/repositories/clinical-note.repository';
-import { moodLogRepository } from '../src/server/repositories/mood-log.repository';
-import { appointmentRepository } from '../src/server/repositories/appointment.repository';
-import { auditLogRepository } from '../src/server/repositories/audit-log.repository';
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from '../src/server/app.module';
 import { getSqliteDb, closeSqliteDb } from '../src/server/db/sqlite-db';
 
 async function runE2EVerticalSliceTest() {
   console.log('================================================================');
-  console.log('  STARTING END-TO-END VERTICAL SLICE & PROCESS RESTART TEST  ');
+  console.log('  STARTING END-TO-END VERTICAL SLICE & PROCESS RESTART TEST (NestJS)  ');
   console.log('================================================================\n');
 
   const e2eDbPath = path.join(process.cwd(), 'data', 'saman_e2e_slice.db');
@@ -26,81 +21,9 @@ async function runE2EVerticalSliceTest() {
   console.log('🚀 [PHASE 1] Initializing Server Process Instance 1 with SQLite...');
   await getSqliteDb(e2eDbPath);
 
-  function createServerApp() {
-    const app = express();
-    app.use(express.json());
-    app.use(authMiddleware);
-
-    app.get('/api/health', (req, res) => {
-      res.json({ status: 'ok', database: 'saman_e2e_slice.db' });
-    });
-
-    app.post('/api/login', handleLogin);
-
-    app.post('/api/ai/gateway', (req, res) => {
-      const { action, payload } = req.body;
-      if (action === 'chatCompanion') {
-        return res.json({
-          result: `سلام ${payload.patientName || 'مراجع گرامی'}! در مواقع احساس پنیک و اضطراب، تکنیک تنفس دیافراگمی ۴-۷-۸ و زمین‌گیری ۵-۴-۳-۲-۱ به شما کمک می‌کند.`,
-        });
-      }
-      res.json({ result: 'AI response processed successfully.' });
-    });
-
-    app.post('/api/sync/outbox', async (req, res) => {
-      const { items } = req.body;
-      if (!Array.isArray(items)) return res.status(400).json({ error: 'items must be array' });
-
-      const syncedIds: string[] = [];
-      for (const item of items) {
-        if (item.aggregateType === 'Patient') {
-          await patientRepository.save(item.payload);
-          syncedIds.push(item.id);
-        } else if (item.aggregateType === 'Appointment') {
-          await appointmentRepository.save(item.payload);
-          syncedIds.push(item.id);
-        } else if (item.aggregateType === 'ClinicalNote') {
-          await clinicalNoteRepository.save(item.payload);
-          syncedIds.push(item.id);
-        } else if (item.aggregateType === 'MoodLog') {
-          await moodLogRepository.save(item.payload);
-          syncedIds.push(item.id);
-        }
-      }
-      res.json({ status: 'success', syncedIds });
-    });
-
-    app.post('/api/audit-logs', async (req, res) => {
-      await auditLogRepository.save(req.body);
-      res.json({ status: 'logged', id: req.body.id });
-    });
-
-    app.get('/api/patients', async (req, res) => {
-      const patients = await patientRepository.findAll();
-      res.json(patients);
-    });
-
-    app.get('/api/appointments', async (req, res) => {
-      const appointments = await appointmentRepository.findAll();
-      res.json(appointments);
-    });
-
-    app.get('/api/clinical-notes', async (req, res) => {
-      const notes = await clinicalNoteRepository.findAll();
-      res.json(notes);
-    });
-
-    app.get('/api/mood-logs', async (req, res) => {
-      const moods = await moodLogRepository.findAll();
-      res.json(moods);
-    });
-
-    return app;
-  }
-
-  const PORT = 3002;
-  let server1 = http.createServer(createServerApp());
-  await new Promise<void>((resolve) => server1.listen(PORT, resolve));
+  const PORT = 3004;
+  const app1 = await NestFactory.create(AppModule, { logger: false });
+  await app1.listen(PORT, '0.0.0.0');
   const baseUrl = `http://localhost:${PORT}`;
 
   let passed = 0;
@@ -114,6 +37,8 @@ async function runE2EVerticalSliceTest() {
       failed++;
     }
   }
+
+  let app2: any = null;
 
   try {
     // Authenticate
@@ -263,16 +188,27 @@ async function runE2EVerticalSliceTest() {
       }),
     });
     const dataChat = await resChat.json();
-    assert(
-      dataChat.result.includes('زمین‌گیری') || dataChat.result.includes('زهرا'),
-      'AI Gateway: Received valid CBT-guided reply from AI Companion'
-    );
+    const hasKey = !!process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY';
+    if (hasKey) {
+      assert(
+        resChat.status === 200 &&
+          dataChat.source === 'gemini' &&
+          typeof dataChat.result === 'string' &&
+          dataChat.result.length > 0,
+        'AI Gateway: Confirmed genuine Gemini API response (source: "gemini")'
+      );
+    } else {
+      assert(
+        resChat.status === 200 && dataChat.source === 'fallback',
+        'AI Gateway: Received valid fallback response when no API key present'
+      );
+    }
 
     // PHASE 2: KILL SERVER PROCESS & RESTART
     console.log('\n----------------------------------------------------------------');
     console.log(' 🛑 [PHASE 2] STOPPING SERVER PROCESS ENTIRELY (PROCESS KILL) ...');
     console.log('----------------------------------------------------------------');
-    await new Promise<void>((resolve) => server1.close(() => resolve()));
+    await app1.close();
     closeSqliteDb();
     console.log(' ⚡ Server process terminated. DB connections closed.');
 
@@ -284,8 +220,8 @@ async function runE2EVerticalSliceTest() {
     console.log(' 🔄 [PHASE 3] RESTARTING SERVER PROCESS & RELOADING UI DATA ...');
     console.log('----------------------------------------------------------------');
     await getSqliteDb(e2eDbPath);
-    let server2 = http.createServer(createServerApp());
-    await new Promise<void>((resolve) => server2.listen(PORT, resolve));
+    app2 = await NestFactory.create(AppModule, { logger: false });
+    await app2.listen(PORT, '0.0.0.0');
 
     // Re-verify all records via UI APIs
     const patRes = await fetch(`${baseUrl}/api/patients`, { headers });
@@ -324,11 +260,15 @@ async function runE2EVerticalSliceTest() {
     );
 
     // Clean up server 2
-    server2.close();
+    await app2.close();
+    app2 = null;
   } catch (err: any) {
     console.error('❌ E2E Slice Test Error:', err);
     failed++;
   } finally {
+    if (app2) {
+      await app2.close();
+    }
     closeSqliteDb();
     if (fs.existsSync(e2eDbPath)) {
       fs.unlinkSync(e2eDbPath);

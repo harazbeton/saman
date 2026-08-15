@@ -1,6 +1,8 @@
+import { Injectable } from '@nestjs/common';
 import { IBaseRepository } from './base-repository.interface';
 import { getSqliteDb, persistDbToDisk } from '../db/sqlite-db';
 
+@Injectable()
 export class ClinicalNoteRepository implements IBaseRepository<any> {
   async save(note: any): Promise<any> {
     const db = await getSqliteDb();

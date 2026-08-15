@@ -1,8 +1,33 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { PluginSlotRenderer } from '../PluginSlotRenderer';
-import { Stethoscope, ShieldCheck, Clock, Users } from 'lucide-react';
+import { Stethoscope, ShieldCheck, CalendarCheck, FileText, History, LayoutDashboard } from 'lucide-react';
+import { globalEventBus } from '../../core/kernel/event-bus';
 
 export const TherapistView: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'timeline' | 'notes'>('dashboard');
+
+  useEffect(() => {
+    const handleHash = () => {
+      if (window.location.hash.includes('/patients/') && window.location.hash.includes('/timeline')) {
+        setActiveTab('timeline');
+      }
+    };
+
+    handleHash();
+    window.addEventListener('hashchange', handleHash);
+
+    const unsub = globalEventBus.subscribe('patient.selected', (evt) => {
+      if (evt.payload?.targetView === 'timeline') {
+        setActiveTab('timeline');
+      }
+    });
+
+    return () => {
+      window.removeEventListener('hashchange', handleHash);
+      unsub();
+    };
+  }, []);
+
   return (
     <div className="space-y-6">
       {/* Therapist Header Banner */}
@@ -15,8 +40,7 @@ export const TherapistView: React.FC = () => {
             </span>
             <h2 className="text-xl font-bold tracking-tight">خوش آمدید، دکتر علیرضا محمدی</h2>
             <p className="text-xs text-indigo-100/90 leading-relaxed">
-              شما امروز <strong className="text-white">۲ جلسه فعال</strong> دارید. آخرین نوت بالینی
-              مراجع (سارا احمدی) در حال ویرایش است.
+              مدیریت جلسات روزانه، تایم‌لاین یکپارچه سوابق بالینی و نگارش پرونده‌های تشخیصی استاندارد
             </p>
           </div>
 
@@ -28,18 +52,74 @@ export const TherapistView: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* View Switcher Tabs */}
+        <div className="flex items-center gap-2 mt-5 pt-4 border-t border-indigo-700/50">
+          <button
+            type="button"
+            onClick={() => setActiveTab('dashboard')}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === 'dashboard'
+                ? 'bg-white text-indigo-950 shadow-md'
+                : 'bg-indigo-950/40 text-indigo-200 hover:bg-indigo-800/60'
+            }`}
+          >
+            <LayoutDashboard className="w-4 h-4" />
+            داشبورد جلسات امروز
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('timeline')}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === 'timeline'
+                ? 'bg-white text-indigo-950 shadow-md'
+                : 'bg-indigo-950/40 text-indigo-200 hover:bg-indigo-800/60'
+            }`}
+          >
+            <History className="w-4 h-4" />
+            تایم‌لاین پرونده بالینی مراجع
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('notes')}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === 'notes'
+                ? 'bg-white text-indigo-950 shadow-md'
+                : 'bg-indigo-950/40 text-indigo-200 hover:bg-indigo-800/60'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            پرونده‌نویسی بالینی (SOAP)
+          </button>
+        </div>
       </div>
 
       {/* Grid Layout driven by Plugin Slots */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Clinical Editor Column */}
+        {/* Main Column */}
         <div className="lg:col-span-2 space-y-6">
-          <PluginSlotRenderer name="therapist.clinical.notes" />
+          {activeTab === 'dashboard' && (
+            <>
+              <PluginSlotRenderer name="therapist.dashboard.main" />
+              <PluginSlotRenderer name="therapist.clinical.notes" />
+            </>
+          )}
+
+          {activeTab === 'timeline' && (
+            <PluginSlotRenderer name="therapist.session.main" />
+          )}
+
+          {activeTab === 'notes' && (
+            <PluginSlotRenderer name="therapist.clinical.notes" />
+          )}
         </div>
 
-        {/* Sidebar Widgets Column (AI Copilot, Todays Patients) */}
+        {/* Sidebar Widgets Column */}
         <div className="space-y-6">
           <PluginSlotRenderer name="therapist.today.widgets" />
+          <PluginSlotRenderer name="therapist.dashboard.sidebar" />
         </div>
       </div>
     </div>
