@@ -64,7 +64,7 @@ const STATIC_DEMO_USERS: UserContext[] = [
     name: 'دکتر علیرضا محمدی',
     role: 'therapist',
     email: 'therapist@saman.ir',
-    isAdmin: false,
+    isAdmin: true,
     visiblePanels: null,
     tenantId: 'clinic-main',
   },

@@ -19,7 +19,7 @@ export default function App() {
     name: 'دکتر علیرضا محمدی',
     email: 'therapist@saman.ir',
     role: 'therapist',
-    isAdmin: false,
+    isAdmin: true,
     visiblePanels: null,
     tenantId: 'clinic-main',
   });

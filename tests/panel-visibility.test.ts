@@ -57,6 +57,15 @@ async function runPanelVisibilityTests() {
       issuedAt: new Date().toISOString(),
     });
 
+    const nonAdminTherapistToken = generateToken({
+      userId: 'user-therapist-multi',
+      role: 'therapist',
+      name: 'دکتر سمیعی',
+      isAdmin: false,
+      visiblePanels: null,
+      issuedAt: new Date().toISOString(),
+    });
+
     const multiPanelTherapistToken = generateToken({
       userId: 'user-therapist-multi',
       role: 'therapist',
@@ -75,24 +84,24 @@ async function runPanelVisibilityTests() {
       issuedAt: new Date().toISOString(),
     });
 
-    // TEST 1: Normal Therapist (visiblePanels = null) accessing Therapist endpoint
-    console.log('[1/13] Testing Normal Therapist access to Clinical Notes (Therapist Endpoint)...');
+    // TEST 1: Therapist accessing Therapist endpoint
+    console.log('[1/13] Testing Therapist access to Clinical Notes (Therapist Endpoint)...');
     const res1 = await fetch(`${baseUrl}/api/clinical-notes`, {
       headers: { Authorization: `Bearer ${normalTherapistToken}` },
     });
-    assert(res1.status === 200, 'Normal therapist is authorized (200) for /api/clinical-notes');
+    assert(res1.status === 200, 'Therapist is authorized (200) for /api/clinical-notes');
 
-    // TEST 2: Normal Therapist (visiblePanels = null) accessing Admin endpoint (Must 403)
-    console.log('[2/13] Testing Normal Therapist access to Admin Endpoint (PATCH /api/users/:id/panels)...');
+    // TEST 2: Non-Admin Therapist accessing Admin endpoint (Must 403)
+    console.log('[2/13] Testing Non-Admin Therapist access to Admin Endpoint (PATCH /api/users/:id/panels)...');
     const res2 = await fetch(`${baseUrl}/api/users/user-patient/panels`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${normalTherapistToken}`,
+        Authorization: `Bearer ${nonAdminTherapistToken}`,
       },
       body: JSON.stringify({ visiblePanels: ['reception'] }),
     });
-    assert(res2.status === 403, 'Normal therapist gets 403 Forbidden on admin endpoint');
+    assert(res2.status === 403, 'Non-admin therapist gets 403 Forbidden on admin endpoint');
 
     // TEST 3: Multi-Panel Therapist (visiblePanels = ['reception','patient','therapist']) accessing Reception endpoints
     console.log('[3/13] Testing Multi-Panel Therapist access to Reception Endpoints (/api/appointments, /api/patients)...');

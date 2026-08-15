@@ -160,7 +160,7 @@ export async function getSqliteDb(customPath?: string): Promise<Database> {
         name: 'دکتر علیرضا محمدی',
         email: 'therapist@saman.ir',
         role: 'therapist',
-        isAdmin: 0,
+        isAdmin: 1,
         visiblePanels: null,
         password: 'saman123',
       },
