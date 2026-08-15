@@ -10,10 +10,10 @@ import { createServer as createViteServer } from 'vite';
 export async function bootstrap(port = 3000) {
   // Initialize SQLite database
   await getSqliteDb();
-
   const app = await NestFactory.create(AppModule);
-
   const expressApp = app.getHttpAdapter().getInstance();
+  expressApp.use(express.json());
+  expressApp.use(express.urlencoded({ extended: true }));
 
   // Vite Middleware in Dev & Static Serving in Prod
   if (process.env.NODE_ENV !== 'production') {

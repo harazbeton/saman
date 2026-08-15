@@ -10,6 +10,6 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(@Body() body: { password?: string; userId?: string; email?: string }) {
-    return this.authService.login(body?.password, body?.userId, body?.email);
+    return this.authService.login(body.password, body.userId, body.email);
   }
 }
