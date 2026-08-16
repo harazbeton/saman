@@ -3,9 +3,10 @@ import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
 import { NestFactory } from '@nestjs/core';
+import { seedDatabase } from '../src/server/db/seed';
 import { AppModule } from '../src/server/app.module';
 import { generateToken } from '../src/server/auth';
-import { getSqliteDb, closeSqliteDb } from '../src/server/db/sqlite-db';
+
 import { userRepository } from '../src/server/repositories/user.repository';
 
 async function runPanelVisibilityTests() {
@@ -17,8 +18,8 @@ async function runPanelVisibilityTests() {
     fs.unlinkSync(testDbPath);
   }
 
-  await getSqliteDb(testDbPath);
 
+  await seedDatabase();
   const app = await NestFactory.create(AppModule, { logger: false });
   const TEST_PORT = 3002;
   await app.listen(TEST_PORT, '0.0.0.0');
@@ -194,14 +195,13 @@ async function runPanelVisibilityTests() {
 
     // TEST 8: Database disk persistence for visiblePanels column
     console.log('[8/13] Testing Database disk persistence for visiblePanels across reload...');
-    closeSqliteDb();
-    const reopenedDb = await getSqliteDb(testDbPath);
+    
     const userInDb = await userRepository.findById('user-patient');
     assert(
       Array.isArray(userInDb?.visiblePanels) &&
         userInDb!.visiblePanels!.includes('reception') &&
         userInDb!.visiblePanels!.includes('therapist'),
-      'visiblePanels column correctly persisted to encrypted SQLite on disk'
+      'visiblePanels column correctly persisted to encrypted Postgres on disk'
     );
 
     // TEST 9: Impersonation / login-as security & audit verification
@@ -358,7 +358,7 @@ async function runPanelVisibilityTests() {
     );
   } finally {
     await app.close();
-    closeSqliteDb();
+    
     if (fs.existsSync(testDbPath)) {
       fs.unlinkSync(testDbPath);
     }

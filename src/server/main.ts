@@ -2,15 +2,18 @@ import 'reflect-metadata';
 import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { getSqliteDb } from './db/sqlite-db';
 import path from 'path';
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
+import { seedDatabase } from './db/seed';
 
 export async function bootstrap(port = 3000) {
-  // Initialize SQLite database
-  await getSqliteDb();
-  
+  try {
+    await seedDatabase();
+  } catch (err: any) {
+    console.warn('⚠️ Seed warning:', err?.message || err);
+  }
+
   const app = await NestFactory.create(AppModule);
   const expressApp = app.getHttpAdapter().getInstance();
 
@@ -39,6 +42,7 @@ export async function bootstrap(port = 3000) {
         express.static(distPath)(req, res, next);
       }
     });
+
     // Add a catch-all for SPA in production for non-api routes
     expressApp.use((req, res, next) => {
       if (!req.url.startsWith('/api')) {

@@ -3,14 +3,16 @@ import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
 import { NestFactory } from '@nestjs/core';
+import { seedDatabase } from '../src/server/db/seed';
 import { AppModule } from '../src/server/app.module';
-import { getSqliteDb, closeSqliteDb } from '../src/server/db/sqlite-db';
+
 
 async function runLoginScreenTests() {
   console.log('=============== STARTING LOGIN SCREEN & RBAC TESTS ===============\n');
 
-  await getSqliteDb();
+  
 
+  await seedDatabase();
   const app = await NestFactory.create(AppModule, { logger: false });
   const TEST_PORT = 3006;
   await app.listen(TEST_PORT, '0.0.0.0');
@@ -82,7 +84,7 @@ async function runLoginScreenTests() {
     failed++;
   } finally {
     await app.close();
-    closeSqliteDb();
+    
   }
 
   console.log(`\n================================================`);

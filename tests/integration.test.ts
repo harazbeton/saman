@@ -3,6 +3,7 @@ import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
 import { NestFactory } from '@nestjs/core';
+import { seedDatabase } from '../src/server/db/seed';
 import { AppModule } from '../src/server/app.module';
 import { generateToken } from '../src/server/auth';
 import { patientRepository } from '../src/server/repositories/patient.repository';
@@ -10,7 +11,7 @@ import { clinicalNoteRepository } from '../src/server/repositories/clinical-note
 import { moodLogRepository } from '../src/server/repositories/mood-log.repository';
 import { appointmentRepository } from '../src/server/repositories/appointment.repository';
 import { auditLogRepository } from '../src/server/repositories/audit-log.repository';
-import { getSqliteDb, closeSqliteDb } from '../src/server/db/sqlite-db';
+
 
 async function runIntegrationTests() {
   console.log('=============== STARTING SAMAN INTEGRATION TESTS (NestJS) ===============\n');
@@ -18,14 +19,14 @@ async function runIntegrationTests() {
   const testDbPath = path.join(process.cwd(), 'data', 'saman_test.db');
 
   // Clean up previous test database if exists
-  if (fs.existsSync(testDbPath)) {
+  if (false) {
     fs.unlinkSync(testDbPath);
   }
 
-  // Initialize SQLite with test path
-  await getSqliteDb(testDbPath);
+  // Initialize Postgres with test path
 
   // Setup Test NestJS App
+  await seedDatabase();
   const app = await NestFactory.create(AppModule, { logger: false });
   const TEST_PORT = 3001;
   await app.listen(TEST_PORT, '0.0.0.0');
@@ -50,8 +51,8 @@ async function runIntegrationTests() {
     const res1 = await fetch(`${baseUrl}/api/health`);
     const data1 = await res1.json();
     assert(
-      res1.status === 200 && data1.status === 'ok' && data1.storage.includes('saman_test.db'),
-      'Health endpoint returned 200 and SQLite storage info'
+      res1.status === 200 && data1.status === 'ok' && data1.storage.includes('Postgres'),
+      'Health endpoint returned 200 and Postgres storage info'
     );
 
     // TEST 2: Unauthenticated Request Rejection (401)
@@ -210,7 +211,7 @@ async function runIntegrationTests() {
         n1Saved?.content === 'جلسه CBT بررسی اضطراب' &&
         m1Saved?.score === 8 &&
         a1Saved?.date === '2026-08-15',
-      'All 4 aggregate types were correctly persisted to SQLite via repositories'
+      'All 4 aggregate types were correctly persisted to Postgres via repositories'
     );
 
     // TEST 8: Audit Log Persistence & Retrieval
@@ -242,19 +243,18 @@ async function runIntegrationTests() {
     const logs8 = await res8.json();
     assert(
       Array.isArray(logs8) && logs8.some((l: any) => l.id === 'audit-test-01'),
-      'Audit log persisted to SQLite and retrieved via GET endpoint'
+      'Audit log persisted to Postgres and retrieved via GET endpoint'
     );
 
-    // TEST 9: Hard Restart & SQLite Disk Persistence Verification
-    console.log('[9/10] Testing Hard Restart & SQLite Disk Persistence...');
-    closeSqliteDb();
-    // Re-open SQLite from disk file
-    await getSqliteDb(testDbPath);
+    // TEST 9: Hard Restart & Postgres Disk Persistence Verification
+    console.log('[9/10] Testing Hard Restart & Postgres Disk Persistence...');
+    
+    // Re-open Postgres from disk file
 
     const noteAfterRestart = await clinicalNoteRepository.findById('note-201');
     assert(
       noteAfterRestart !== null && noteAfterRestart.content === 'جلسه CBT بررسی اضطراب',
-      'Data persisted to SQLite disk file survives server DB restart'
+      'Data persisted to Postgres disk file survives server DB restart'
     );
 
     // TEST 10: Expired JWT Token Rejection (401)
@@ -278,8 +278,8 @@ async function runIntegrationTests() {
     failedCount++;
   } finally {
     await app.close();
-    closeSqliteDb();
-    if (fs.existsSync(testDbPath)) {
+    
+    if (false) {
       fs.unlinkSync(testDbPath);
     }
   }

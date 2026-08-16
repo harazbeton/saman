@@ -1,0 +1,62 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Patient {
+  id        String   @id
+  payload   String
+  updatedAt String
+  @@map("patients")
+}
+
+model ClinicalNote {
+  id        String   @id
+  payload   String
+  updatedAt String
+  @@map("clinical_notes")
+}
+
+model MoodLog {
+  id        String   @id
+  payload   String
+  updatedAt String
+  @@map("mood_logs")
+}
+
+model Appointment {
+  id        String   @id
+  payload   String
+  updatedAt String
+  @@map("appointments")
+}
+
+model AuditLog {
+  id              String  @id
+  user_id         String?
+  user_name       String?
+  user_role       String?
+  action          String?
+  resource_type   String?
+  resource_id     String?
+  details         String?
+  impersonated_by String?
+  timestamp       String
+  @@map("audit_logs")
+}
+
+model User {
+  id            String  @id
+  name          String
+  email         String
+  role          String
+  isAdmin       Int     @default(0)
+  visiblePanels String?
+  password      String?
+  updatedAt     String
+  @@map("users")
+}

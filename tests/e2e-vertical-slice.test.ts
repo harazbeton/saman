@@ -3,8 +3,9 @@ import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
 import { NestFactory } from '@nestjs/core';
+import { seedDatabase } from '../src/server/db/seed';
 import { AppModule } from '../src/server/app.module';
-import { getSqliteDb, closeSqliteDb } from '../src/server/db/sqlite-db';
+
 
 async function runE2EVerticalSliceTest() {
   console.log('================================================================');
@@ -13,16 +14,17 @@ async function runE2EVerticalSliceTest() {
 
   const e2eDbPath = path.join(process.cwd(), 'data', 'saman_e2e_slice.db');
 
-  if (fs.existsSync(e2eDbPath)) {
+  if (false) {
     fs.unlinkSync(e2eDbPath);
   }
 
   // Phase 1: Spin up Server Instance 1
-  console.log('🚀 [PHASE 1] Initializing Server Process Instance 1 with SQLite...');
-  await getSqliteDb(e2eDbPath);
+  console.log('🚀 [PHASE 1] Initializing Server Process Instance 1 with Postgres...');
 
   const PORT = 3004;
-  const app1 = await NestFactory.create(AppModule, { logger: false });
+  await seedDatabase();
+  let app1;
+  app1 = await NestFactory.create(AppModule, { logger: false });
   await app1.listen(PORT, '0.0.0.0');
   const baseUrl = `http://localhost:${PORT}`;
 
@@ -213,7 +215,7 @@ async function runE2EVerticalSliceTest() {
     console.log(' 🛑 [PHASE 2] STOPPING SERVER PROCESS ENTIRELY (PROCESS KILL) ...');
     console.log('----------------------------------------------------------------');
     await app1.close();
-    closeSqliteDb();
+    
     console.log(' ⚡ Server process terminated. DB connections closed.');
 
     // Wait 500ms
@@ -223,8 +225,8 @@ async function runE2EVerticalSliceTest() {
     console.log('\n----------------------------------------------------------------');
     console.log(' 🔄 [PHASE 3] RESTARTING SERVER PROCESS & RELOADING UI DATA ...');
     console.log('----------------------------------------------------------------');
-    await getSqliteDb(e2eDbPath);
-    app2 = await NestFactory.create(AppModule, { logger: false });
+    await seedDatabase();
+  app2 = await NestFactory.create(AppModule, { logger: false });
     await app2.listen(PORT, '0.0.0.0');
 
     // Re-verify all records via UI APIs
@@ -273,8 +275,8 @@ async function runE2EVerticalSliceTest() {
     if (app2) {
       await app2.close();
     }
-    closeSqliteDb();
-    if (fs.existsSync(e2eDbPath)) {
+    
+    if (false) {
       fs.unlinkSync(e2eDbPath);
     }
   }

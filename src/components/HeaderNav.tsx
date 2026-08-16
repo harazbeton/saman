@@ -88,7 +88,7 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [allUsers, setAllUsers] = useState<UserContext[]>([]);
 
-  const isDevelopment = import.meta.env.MODE !== 'production';
+  const isDevelopment = Boolean((import.meta as any).env?.DEV ?? true);
 
   useEffect(() => {
     const updateCount = () => {

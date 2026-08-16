@@ -1,3 +1,8 @@
+// 
+// PARKED: This custom AES-256-GCM file-encryption layer and SQLite implementation
+// has been removed from the active write/read path in favor of a managed Postgres database via Prisma.
+// It is preserved here for the future offline Tauri/desktop implementation.
+//
 import initSqlJs, { Database } from 'sql.js';
 import fs from 'fs';
 import path from 'path';
@@ -5,8 +10,8 @@ import crypto from 'crypto';
 
 let dbInstance: Database | null = null;
 let currentDbPath = '';
-const ALGORITHM = 'aes-256-gcm';
 
+const ALGORITHM = 'aes-256-gcm';
 function getCandidateKeys(): Buffer[] {
   const pass = process.env.DB_ENCRYPTION_KEY?.replace(/^['"]|['"]$/g, '');
   if (!pass || pass === 'MY_DB_ENCRYPTION_KEY') {
@@ -21,24 +26,30 @@ export function encryptBuffer(buffer: Buffer, key?: Buffer): Buffer {
   const cipher = crypto.createCipheriv(ALGORITHM, encKey, iv);
   const encrypted = Buffer.concat([cipher.update(buffer), cipher.final()]);
   const authTag = cipher.getAuthTag();
+  // Binary format: [12 bytes IV][16 bytes AuthTag][Encrypted SQLite Data]
   return Buffer.concat([iv, authTag, encrypted]);
 }
 
 export function decryptBuffer(encryptedBuffer: Buffer): Buffer {
+  // Backwards compatibility check for legacy plain SQLite header
   if (
     encryptedBuffer.length >= 15 &&
     encryptedBuffer.subarray(0, 15).toString() === 'SQLite format 3'
   ) {
     return encryptedBuffer;
   }
+
   if (encryptedBuffer.length < 28) {
     throw new Error('Invalid encrypted database file format: File size too small');
   }
+
   const iv = encryptedBuffer.subarray(0, 12);
   const authTag = encryptedBuffer.subarray(12, 28);
   const ciphertext = encryptedBuffer.subarray(28);
+
   const keys = getCandidateKeys();
   let lastError: Error | null = null;
+
   for (const key of keys) {
     try {
       const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
@@ -48,25 +59,19 @@ export function decryptBuffer(encryptedBuffer: Buffer): Buffer {
       lastError = err;
     }
   }
+
   throw lastError || new Error('Failed to decrypt database with all available keys');
 }
 
 export async function getSqliteDb(customPath?: string): Promise<Database> {
-  const targetPath = customPath || currentDbPath || path.join(process.cwd(), 'data', 'saman.db');
-  if (dbInstance && currentDbPath === targetPath) {
+  if (dbInstance && (!customPath || customPath === currentDbPath)) {
     return dbInstance;
-  }
-  if (dbInstance && currentDbPath !== targetPath) {
-    try {
-      persistDbToDisk(dbInstance, currentDbPath);
-      dbInstance.close();
-    } catch {}
-    dbInstance = null;
   }
 
   const SQL = await initSqlJs();
-  currentDbPath = targetPath;
+  currentDbPath = customPath || path.join(process.cwd(), 'data', 'saman.db');
   const dir = path.dirname(currentDbPath);
+
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
@@ -143,52 +148,62 @@ export async function getSqliteDb(customPath?: string): Promise<Database> {
   dbInstance.run("UPDATE users SET role = 'therapist', visiblePanels = ? WHERE id = 'user-receptionist'", [JSON.stringify(['reception'])]);
   dbInstance.run("UPDATE users SET role = 'therapist' WHERE role = 'receptionist'");
 
-  // Upsert default users
-  const now = new Date().toISOString();
-  const defaultUsers = [
-    {
-      id: 'user-therapist',
-      name: 'دکتر علیرضا محمدی',
-      email: 'therapist@saman.ir',
-      role: 'therapist',
-      isAdmin: 1,
-      visiblePanels: null,
-      password: 'saman123',
-    },
-    {
-      id: 'user-therapist-multi',
-      name: 'دکتر سمیعی (حساب آزمایشی چندپنله)',
-      email: 'therapist.test@saman.ir',
-      role: 'therapist',
-      isAdmin: 0,
-      visiblePanels: JSON.stringify(['reception', 'patient', 'therapist']),
-      password: 'saman123',
-    },
-    {
-      id: 'user-patient',
-      name: 'سارا احمدی',
-      email: 'patient@saman.ir',
-      role: 'patient',
-      isAdmin: 0,
-      visiblePanels: null,
-      password: 'saman123',
-    },
-    {
-      id: 'user-receptionist',
-      name: 'خانم شریفی (پذیرش)',
-      email: 'reception@saman.ir',
-      role: 'therapist',
-      isAdmin: 0,
-      visiblePanels: JSON.stringify(['reception']),
-      password: 'saman123',
-    },
-  ];
+  // Seed default users if table is empty
+  const userCheckStmt = dbInstance.prepare('SELECT COUNT(*) as cnt FROM users');
+  let userCount = 0;
+  if (userCheckStmt.step()) {
+    const obj = userCheckStmt.getAsObject();
+    userCount = Number(obj.cnt || 0);
+  }
+  userCheckStmt.free();
 
-  for (const u of defaultUsers) {
-    dbInstance.run(
-      'INSERT OR REPLACE INTO users (id, name, email, role, isAdmin, visiblePanels, password, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [u.id, u.name, u.email, u.role, u.isAdmin, u.visiblePanels, u.password, now]
-    );
+  if (userCount === 0) {
+    const now = new Date().toISOString();
+    const defaultUsers = [
+      {
+        id: 'user-therapist',
+        name: 'دکتر علیرضا محمدی',
+        email: 'therapist@saman.ir',
+        role: 'therapist',
+        isAdmin: 1,
+        visiblePanels: null,
+        password: 'saman123',
+      },
+      {
+        id: 'user-therapist-multi',
+        name: 'دکتر سمیعی (حساب آزمایشی چندپنله)',
+        email: 'therapist.test@saman.ir',
+        role: 'therapist',
+        isAdmin: 0,
+        visiblePanels: JSON.stringify(['reception', 'patient', 'therapist']),
+        password: 'saman123',
+      },
+      {
+        id: 'user-patient',
+        name: 'سارا احمدی',
+        email: 'patient@saman.ir',
+        role: 'patient',
+        isAdmin: 0,
+        visiblePanels: null,
+        password: 'saman123',
+      },
+      {
+        id: 'user-receptionist',
+        name: 'خانم شریفی (پذیرش)',
+        email: 'reception@saman.ir',
+        role: 'therapist',
+        isAdmin: 0,
+        visiblePanels: JSON.stringify(['reception']),
+        password: 'saman123',
+      },
+    ];
+
+    for (const u of defaultUsers) {
+      dbInstance.run(
+        'INSERT OR REPLACE INTO users (id, name, email, role, isAdmin, visiblePanels, password, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [u.id, u.name, u.email, u.role, u.isAdmin, u.visiblePanels, u.password, now]
+      );
+    }
   }
 
   persistDbToDisk(dbInstance, currentDbPath);
@@ -210,10 +225,8 @@ export function persistDbToDisk(db: Database, targetPath?: string) {
 
 export function closeSqliteDb() {
   if (dbInstance) {
-    try {
-      persistDbToDisk(dbInstance);
-      dbInstance.close();
-    } catch {}
+    persistDbToDisk(dbInstance);
+    dbInstance.close();
     dbInstance = null;
     currentDbPath = '';
   }
@@ -222,3 +235,4 @@ export function closeSqliteDb() {
 export function getCurrentDbPath(): string {
   return currentDbPath || path.join(process.cwd(), 'data', 'saman.db');
 }
+

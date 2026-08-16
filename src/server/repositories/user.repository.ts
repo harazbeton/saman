@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { IBaseRepository } from './base-repository.interface';
+import { getValidDatabaseUrl, prisma } from '../db/prisma.service';
 import { getSqliteDb, persistDbToDisk } from '../db/sqlite-db';
 
 export interface UserRecord {
@@ -24,7 +25,6 @@ export class UserRepository implements IBaseRepository<UserRecord> {
         parsedPanels = null;
       }
     }
-
     return {
       id: row.id,
       name: row.name,
@@ -32,13 +32,12 @@ export class UserRepository implements IBaseRepository<UserRecord> {
       role: row.role,
       isAdmin: Boolean(row.isAdmin),
       visiblePanels: parsedPanels,
-      password: row.password,
+      password: row.password || undefined,
       updatedAt: row.updatedAt,
     };
   }
 
   async save(user: UserRecord): Promise<UserRecord> {
-    const db = await getSqliteDb();
     const id = user.id;
     const name = user.name;
     const email = user.email;
@@ -51,53 +50,90 @@ export class UserRepository implements IBaseRepository<UserRecord> {
     const password = user.password || 'saman123';
     const updatedAt = user.updatedAt || new Date().toISOString();
 
+    if (getValidDatabaseUrl()) {
+      try {
+        const saved = await prisma.user.upsert({
+          where: { id },
+          update: { name, email, role, isAdmin, visiblePanels, password, updatedAt },
+          create: { id, name, email, role, isAdmin, visiblePanels, password, updatedAt },
+        });
+        return this.mapRow(saved);
+      } catch (err: any) {
+        console.warn('Postgres save user failed, using SQLite:', err?.message || err);
+      }
+    }
+
+    const db = await getSqliteDb();
     db.run(
       'INSERT OR REPLACE INTO users (id, name, email, role, isAdmin, visiblePanels, password, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [id, name, email, role, isAdmin, visiblePanels, password, updatedAt]
     );
     persistDbToDisk(db);
-    return user;
+    return {
+      id,
+      name,
+      email,
+      role,
+      isAdmin: Boolean(isAdmin),
+      visiblePanels: user.visiblePanels || null,
+      password,
+      updatedAt,
+    };
   }
 
   async findById(id: string): Promise<UserRecord | null> {
+    if (getValidDatabaseUrl()) {
+      try {
+        const row = await prisma.user.findUnique({ where: { id } });
+        if (row) return this.mapRow(row);
+      } catch {}
+    }
+
     const db = await getSqliteDb();
-    const stmt = db.prepare(
-      'SELECT id, name, email, role, isAdmin, visiblePanels, password, updatedAt FROM users WHERE id = ?'
-    );
+    const stmt = db.prepare('SELECT * FROM users WHERE id = ?');
     stmt.bind([id]);
+    let result: UserRecord | null = null;
     if (stmt.step()) {
-      const row = stmt.getAsObject();
-      stmt.free();
-      return this.mapRow(row);
+      result = this.mapRow(stmt.getAsObject());
     }
     stmt.free();
-    return null;
+    return result;
   }
 
   async findByEmail(email: string): Promise<UserRecord | null> {
+    if (getValidDatabaseUrl()) {
+      try {
+        const row = await prisma.user.findFirst({ where: { email } });
+        if (row) return this.mapRow(row);
+      } catch {}
+    }
+
     const db = await getSqliteDb();
-    const stmt = db.prepare(
-      'SELECT id, name, email, role, isAdmin, visiblePanels, password, updatedAt FROM users WHERE email = ?'
-    );
+    const stmt = db.prepare('SELECT * FROM users WHERE email = ?');
     stmt.bind([email]);
+    let result: UserRecord | null = null;
     if (stmt.step()) {
-      const row = stmt.getAsObject();
-      stmt.free();
-      return this.mapRow(row);
+      result = this.mapRow(stmt.getAsObject());
     }
     stmt.free();
-    return null;
+    return result;
   }
 
   async findAll(): Promise<UserRecord[]> {
+    if (getValidDatabaseUrl()) {
+      try {
+        const rows = await prisma.user.findMany({ orderBy: { id: 'asc' } });
+        if (rows && rows.length > 0) {
+          return rows.map((r) => this.mapRow(r));
+        }
+      } catch {}
+    }
+
     const db = await getSqliteDb();
-    const stmt = db.prepare(
-      'SELECT id, name, email, role, isAdmin, visiblePanels, password, updatedAt FROM users ORDER BY id ASC'
-    );
+    const stmt = db.prepare('SELECT * FROM users ORDER BY id ASC');
     const results: UserRecord[] = [];
     while (stmt.step()) {
-      const row = stmt.getAsObject();
-      results.push(this.mapRow(row));
+      results.push(this.mapRow(stmt.getAsObject()));
     }
     stmt.free();
     return results;
@@ -113,20 +149,42 @@ export class UserRepository implements IBaseRepository<UserRecord> {
 
     const panelsVal =
       visiblePanels && visiblePanels.length > 0 ? JSON.stringify(visiblePanels) : null;
-    const adminVal = typeof isAdmin === 'boolean' ? (isAdmin ? 1 : 0) : existing.isAdmin ? 1 : 0;
+    const adminVal = typeof isAdmin === 'boolean' ? (isAdmin ? 1 : 0) : (existing.isAdmin ? 1 : 0);
     const now = new Date().toISOString();
 
-    const db = await getSqliteDb();
-    db.run(
-      'UPDATE users SET visiblePanels = ?, isAdmin = ?, updatedAt = ? WHERE id = ?',
-      [panelsVal, adminVal, now, id]
-    );
-    persistDbToDisk(db);
+    if (getValidDatabaseUrl()) {
+      try {
+        const updated = await prisma.user.update({
+          where: { id },
+          data: { visiblePanels: panelsVal, isAdmin: adminVal, updatedAt: now },
+        });
+        return this.mapRow(updated);
+      } catch {}
+    }
 
-    return this.findById(id);
+    const db = await getSqliteDb();
+    db.run('UPDATE users SET visiblePanels = ?, isAdmin = ?, updatedAt = ? WHERE id = ?', [
+      panelsVal,
+      adminVal,
+      now,
+      id,
+    ]);
+    persistDbToDisk(db);
+    return {
+      ...existing,
+      visiblePanels: visiblePanels || null,
+      isAdmin: Boolean(adminVal),
+      updatedAt: now,
+    };
   }
 
   async delete(id: string): Promise<boolean> {
+    if (getValidDatabaseUrl()) {
+      try {
+        await prisma.user.delete({ where: { id } });
+      } catch {}
+    }
+
     const db = await getSqliteDb();
     db.run('DELETE FROM users WHERE id = ?', [id]);
     persistDbToDisk(db);

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { getValidDatabaseUrl, prisma } from '../db/prisma.service';
 import { getSqliteDb, persistDbToDisk } from '../db/sqlite-db';
 
 export interface AuditLogEntry {
@@ -17,33 +18,129 @@ export interface AuditLogEntry {
 @Injectable()
 export class AuditLogRepository {
   async save(log: AuditLogEntry): Promise<any> {
-    const db = await getSqliteDb();
     const id = log.id || `audit-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-    const userId = log.userId || '';
-    const userName = log.userName || '';
-    const userRole = log.userRole || '';
+    const user_id = log.userId || '';
+    const user_name = log.userName || '';
+    const user_role = log.userRole || '';
     const action = log.action || '';
-    const resourceType = log.resourceType || '';
-    const resourceId = log.resourceId || '';
+    const resource_type = log.resourceType || '';
+    const resource_id = log.resourceId || '';
     const details = typeof log.details === 'string' ? log.details : JSON.stringify(log.details || {});
-    const impersonatedBy = log.impersonatedBy || '';
+    const impersonated_by = log.impersonatedBy || '';
     const timestamp = log.timestamp || new Date().toISOString();
 
+    if (getValidDatabaseUrl()) {
+      try {
+        const saved = await prisma.auditLog.upsert({
+          where: { id },
+          update: {
+            user_id,
+            user_name,
+            user_role,
+            action,
+            resource_type,
+            resource_id,
+            details,
+            impersonated_by,
+            timestamp,
+          },
+          create: {
+            id,
+            user_id,
+            user_name,
+            user_role,
+            action,
+            resource_type,
+            resource_id,
+            details,
+            impersonated_by,
+            timestamp,
+          },
+        });
+        return {
+          ...log,
+          id,
+          userId: user_id,
+          userName: user_name,
+          userRole: user_role,
+          action,
+          resourceType: resource_type,
+          resourceId: resource_id,
+          details,
+          impersonatedBy: impersonated_by,
+          timestamp,
+        };
+      } catch {}
+    }
+
+    const db = await getSqliteDb();
     db.run(
-      `INSERT OR REPLACE INTO audit_logs 
-       (id, user_id, user_name, user_role, action, resource_type, resource_id, details, impersonated_by, timestamp) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, userId, userName, userRole, action, resourceType, resourceId, details, impersonatedBy, timestamp]
+      'INSERT OR REPLACE INTO audit_logs (id, user_id, user_name, user_role, action, resource_type, resource_id, details, impersonated_by, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [
+        id,
+        user_id,
+        user_name,
+        user_role,
+        action,
+        resource_type,
+        resource_id,
+        details,
+        impersonated_by,
+        timestamp,
+      ]
     );
     persistDbToDisk(db);
-    return { ...log, id, userId, userName, userRole, action, resourceType, resourceId, details, impersonatedBy, timestamp };
+    return {
+      ...log,
+      id,
+      userId: user_id,
+      userName: user_name,
+      userRole: user_role,
+      action,
+      resourceType: resource_type,
+      resourceId: resource_id,
+      details,
+      impersonatedBy: impersonated_by,
+      timestamp,
+    };
   }
 
   async findAll(limit = 100): Promise<any[]> {
+    if (getValidDatabaseUrl()) {
+      try {
+        const rows = await prisma.auditLog.findMany({
+          orderBy: { timestamp: 'desc' },
+          take: limit,
+        });
+        if (rows && rows.length > 0) {
+          return rows.map((row) => {
+            let parsedDetails = row.details;
+            if (typeof row.details === 'string') {
+              try {
+                parsedDetails = JSON.parse(row.details);
+              } catch {
+                parsedDetails = row.details;
+              }
+            }
+            return {
+              id: row.id,
+              userId: row.user_id,
+              userName: row.user_name,
+              userRole: row.user_role,
+              action: row.action,
+              resourceType: row.resource_type,
+              resourceId: row.resource_id,
+              details: parsedDetails,
+              impersonatedBy: row.impersonated_by,
+              timestamp: row.timestamp,
+            };
+          });
+        }
+      } catch {}
+    }
+
     const db = await getSqliteDb();
-    const stmt = db.prepare(
-      'SELECT id, user_id as userId, user_name as userName, user_role as userRole, action, resource_type as resourceType, resource_id as resourceId, details, impersonated_by as impersonatedBy, timestamp FROM audit_logs ORDER BY timestamp DESC LIMIT ?'
-    );
+    const stmt = db.prepare('SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT ?');
     stmt.bind([limit]);
     const results: any[] = [];
     while (stmt.step()) {
@@ -57,8 +154,16 @@ export class AuditLogRepository {
         }
       }
       results.push({
-        ...row,
+        id: row.id,
+        userId: row.user_id,
+        userName: row.user_name,
+        userRole: row.user_role,
+        action: row.action,
+        resourceType: row.resource_type,
+        resourceId: row.resource_id,
         details: parsedDetails,
+        impersonatedBy: row.impersonated_by,
+        timestamp: row.timestamp,
       });
     }
     stmt.free();
