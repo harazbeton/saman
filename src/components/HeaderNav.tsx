@@ -16,6 +16,9 @@ import {
   UserCheck,
   Shield,
   LogOut,
+  Download,
+  Copy,
+  Check,
 } from 'lucide-react';
 
 export interface PanelDefinition {
@@ -146,6 +149,23 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
         });
       }
     } catch {}
+  };
+
+  const [copiedReport, setCopiedReport] = useState(false);
+
+  const handleCopyReport = async () => {
+    try {
+      const res = await fetch('/DATABASE_MIGRATION_REPORT.md');
+      const text = await res.text();
+      await navigator.clipboard.writeText(text);
+      setCopiedReport(true);
+      setTimeout(() => setCopiedReport(false), 2500);
+    } catch {
+      const a = document.createElement('a');
+      a.href = '/DATABASE_MIGRATION_REPORT.md';
+      a.download = 'DATABASE_MIGRATION_REPORT.md';
+      a.click();
+    }
   };
 
   const visiblePanels = computeAllowedPanels(currentUser);
@@ -285,6 +305,27 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
             title="همگام‌سازی دستی با سرور"
           >
             <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin text-emerald-400' : ''}`} />
+          </button>
+
+          {/* Download / Copy Report Buttons */}
+          <a
+            href="/DATABASE_MIGRATION_REPORT.md"
+            download="DATABASE_MIGRATION_REPORT.md"
+            className="flex items-center gap-1 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 rounded-xl transition-all"
+            title="دانلود گزارش جامع به صورت فایل Markdown"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>دانلود گزارش</span>
+          </a>
+
+          <button
+            type="button"
+            onClick={handleCopyReport}
+            className="flex items-center gap-1 px-3 py-1.5 bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/30 text-sky-300 rounded-xl transition-all"
+            title="کپی متن کامل گزارش در حافظه کلیپ‌بورد"
+          >
+            {copiedReport ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+            <span>{copiedReport ? 'کپی شد!' : 'کپی گزارش'}</span>
           </button>
 
           {/* Audit Logs Trigger */}
